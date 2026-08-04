@@ -190,7 +190,7 @@ versions:
   # by the pipeline rather than reported.
   min: "3.0.6"
   new_per_run: 5
-  poll_interval: "52 */6 * * *"
+  poll_interval: "23 1-23/6 * * *"
 
 tests:
   # `script:` resolves from the REPOSITORY ROOT — unlike `metadata.default` and

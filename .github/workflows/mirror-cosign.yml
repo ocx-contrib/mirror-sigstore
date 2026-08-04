@@ -6,7 +6,7 @@ name: cosign
 
 on:
   schedule:
-    - cron: '52 */6 * * *'
+    - cron: '23 1-23/6 * * *'
   workflow_dispatch:
   push:
     branches: [main]
