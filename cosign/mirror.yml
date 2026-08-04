@@ -146,10 +146,10 @@ assets:
   # ── Pass 2 (darwin) ────────────────────────────────────────────────────────
   # Uncommented together with the matching `platforms:` keys in
   # ../mirror-base.yml, never on their own.
-  # darwin/amd64:
-  #   - "^cosign-darwin-amd64$"
-  # darwin/arm64:
-  #   - "^cosign-darwin-arm64$"
+  darwin/amd64:
+    - "^cosign-darwin-amd64$"
+  darwin/arm64:
+    - "^cosign-darwin-arm64$"
   #
   # ── Pass 3 (windows) ───────────────────────────────────────────────────────
   # amd64 only — there is no `cosign-windows-arm64.exe` on any in-range release.

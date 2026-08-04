@@ -110,17 +110,17 @@ platforms:
   # a platform with no resolvable asset self-skips per VERSION but still boots a
   # real macOS/Windows runner and reports SUCCESS having tested nothing. So the
   # platform key and its asset regex are uncommented in the SAME pass.
-  # darwin/amd64:
-  #   # Intel slice tested on the arm64 macos-14 runner via Rosetta 2 —
-  #   # GitHub's native macos-13 Intel pool is exhausted and deadlocks push.
-  #   # The asset is a GOARCH=amd64 build, so `cosign version` still reports
-  #   # `Platform: darwin/amd64` under Rosetta and the smoke's platform-identity
-  #   # assertion holds.
-  #   runner: macos-14
-  #   prefix: ["arch", "-x86_64"]
-  # darwin/arm64:
-  #   runner: macos-14
-  #   shell: bash
+  darwin/amd64:
+    # Intel slice tested on the arm64 macos-14 runner via Rosetta 2 —
+    # GitHub's native macos-13 Intel pool is exhausted and deadlocks push.
+    # The asset is a GOARCH=amd64 build, so `cosign version` still reports
+    # `Platform: darwin/amd64` under Rosetta and the smoke's platform-identity
+    # assertion holds.
+    runner: macos-14
+    prefix: ["arch", "-x86_64"]
+  darwin/arm64:
+    runner: macos-14
+    shell: bash
   #
   # ── Pass 3 (windows) ───────────────────────────────────────────────────────
   # windows/amd64 ONLY. Upstream ships no windows/arm64 asset — verified across
