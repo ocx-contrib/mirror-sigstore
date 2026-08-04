@@ -56,17 +56,6 @@ key-pair operations are entirely local.
 This package mirrors the **v3.x** line. cosign maintains v2.x in parallel as an
 LTS branch; it is not carried here.
 
-## Install with ocx
-
-```sh
-ocx install ocx.sh/sigstore/cosign
-```
-
-```sh
-# or pin a specific version
-ocx install ocx.sh/sigstore/cosign:3.1.2
-```
-
 ## Links
 
 - [cosign on GitHub](https://github.com/sigstore/cosign)
