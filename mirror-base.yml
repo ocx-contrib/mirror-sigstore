@@ -104,12 +104,13 @@ platforms:
   # No `containers:` on darwin or windows — those runners have no Linux
   # container engine, and the key is rejected at spec load.
   #
-  # ── Pass 2 (darwin) ────────────────────────────────────────────────────────
-  # Kept commented in lockstep with the matching `assets:` keys in
-  # cosign/mirror.yml. Staging `assets:` ALONE would not save runner minutes:
-  # a platform with no resolvable asset self-skips per VERSION but still boots a
-  # real macOS/Windows runner and reports SUCCESS having tested nothing. So the
-  # platform key and its asset regex are uncommented in the SAME pass.
+  # ── Pass 2 (darwin) — LIVE since 2026-08-04 ────────────────────────────────
+  # Rolled out after the linux pass was end-to-end green, in lockstep with the
+  # matching `assets:` keys in cosign/mirror.yml. That lockstep is the rule for
+  # the next platform too: staging `assets:` ALONE would not save runner
+  # minutes, because a platform with no resolvable asset self-skips per VERSION
+  # but still boots a real macOS/Windows runner and reports SUCCESS having
+  # tested nothing. Uncomment the platform key and its asset regex together.
   darwin/amd64:
     # Intel slice tested on the arm64 macos-14 runner via Rosetta 2 —
     # GitHub's native macos-13 Intel pool is exhausted and deadlocks push.
