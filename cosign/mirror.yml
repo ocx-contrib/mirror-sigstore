@@ -153,8 +153,8 @@ assets:
   #
   # ── Pass 3 (windows) ───────────────────────────────────────────────────────
   # amd64 only — there is no `cosign-windows-arm64.exe` on any in-range release.
-  # windows/amd64:
-  #   - "^cosign-windows-amd64\\.exe$"
+  windows/amd64:
+    - "^cosign-windows-amd64\\.exe$"
 
 asset_type:
   # Raw binary on every platform — there is no archive to strip, so the file

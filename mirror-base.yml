@@ -128,9 +128,9 @@ platforms:
   # `cosign-windows-amd64.exe`. Declaring windows/arm64 would boot a
   # `windows-11-arm` runner that self-skips every version and greens having
   # tested nothing.
-  # windows/amd64:
-  #   runner: windows-latest
-  #   shell: pwsh
+  windows/amd64:
+    runner: windows-latest
+    shell: pwsh
 
 notify:
   discord:
