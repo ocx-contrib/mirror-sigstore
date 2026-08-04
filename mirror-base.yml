@@ -1,0 +1,138 @@
+# Shared base for every spec in this repository (cosign, the container/artifact
+# signing tool published by the Sigstore project).
+#
+# NOT a spec: it has no name/target/source and is never loaded on its own.
+# Everything a package owns — name, target, source, assets, asset_type,
+# bin_scan, metadata, catalog, tests, versions, announce, annotations — stays
+# in that package's own mirror.yml.
+#
+# ⚠️ `extends:` is a SHALLOW merge of top-level keys. A spec that sets a key
+# below replaces that block OUTRIGHT — there is no per-key merge. `platforms:`
+# is where this bites: it carries BOTH the runner matrix and the container
+# legs, so a child that restates it to tweak one runner silently drops every
+# `containers:` entry. Nothing reds — the legs simply stop existing, and every
+# os.features claim in that spec goes back to being merely asserted. Restate
+# `platforms:` IN FULL or not at all. This repo is single-package today, so the
+# measured matrix lives HERE and cosign/mirror.yml does not restate it, which
+# removes the trap structurally. Sigstore publishes several tools (rekor,
+# fulcio, gitsign), so a second spec directory is plausible — and it would need
+# its OWN libc measurement rather than inheriting cosign's.
+
+skip_prereleases: true
+cascade: true
+
+# Bare semver versions (`3.1.2`) with no `+build` segment, so the fleet default
+# applies with no exception. A cascade tag (`latest`, `3`, `3.1`) re-points on
+# every re-publish; without a build segment the new manifest would reuse the
+# bare version tag and orphan the prior digest for registry GC, breaking any
+# `@sha256:` pin in a consumer's ocx.lock.
+build_timestamp: date
+
+verify:
+  github_asset_digest: true
+
+concurrency:
+  # These are the largest assets in the fleet by an order of magnitude: raw,
+  # UNSTRIPPED Go binaries carrying full debug_info, measured 122–190 MB each
+  # (`cosign-windows-amd64.exe` at v3.1.2 is 189.6 MB). Three versions × five
+  # platforms is ~2.1 GB of downloads, and a "bundle" here is a single 130 MB+
+  # file recompressed rather than an archive relayered. So the parallelism is
+  # deliberately low: xz over several 190 MB inputs at once is what would
+  # exhaust a runner's RAM, not the download count.
+  max_downloads: 3
+  max_bundles: 2
+  max_pushes: 2
+  rate_limit_ms: 100
+  max_retries: 3
+  compression_threads: 0
+
+# `bin_scan` is FORCED off, not chosen. Every asset is a RAW BINARY, so it
+# lands directly at the content root and metadata.json's PATH is a bare
+# `${installPath}` — the one layout where that is correct. The scan only
+# inspects an interface-visible `${installPath}/<dir>` entry, so with no
+# subdirectory to point at, `auto` and `verify` both fail spec load at exit 65
+# ("bin_scan is enabled but … declares no interface-visible ${installPath}/<dir>
+# PATH entry"). `off` with a hand-listed `binaries` in metadata.json is what
+# that error message itself directs.
+#
+# The hand list is LOAD-BEARING here beyond documentation: GitHub serves raw
+# release assets with mode 0644 (measured — `stat -c %a` on all 15 downloaded
+# cosign assets returns 644), and `prepare` chmods 0755 exactly the names
+# metadata.json DECLARES (ocx-mirror ≥ 0.5.2). An undeclared binary would ship
+# non-executable, and `bin_scan: auto` cannot rescue it — the scan only reports
+# candidates it finds ALREADY executable. Quoted so no YAML 1.1 reader folds
+# the bare word into boolean `false`.
+bin_scan: "off"
+
+# ─── Platform matrix ────────────────────────────────────────────────────────
+#
+# `os.features` states what an artifact REQUIRES OF THE HOST — it is not a
+# label for how it was built. Both Linux arches were byte-measured at BOTH ends
+# of the mirrored range AND in the middle (3.0.6, 3.1.1, 3.1.2 × amd64/arm64 =
+# six artifacts); every one is a statically linked Go binary with no PT_INTERP
+# and no DT_NEEDED. The transcript is recorded above cosign/mirror.yml's
+# `assets:`, including the UPX exclusion and the decisive alpine run.
+#
+# So both Linux keys are BARE. `+libc.glibc` would hide the package from
+# Alpine; `+libc.musl` would hide it from every glibc host it in fact runs on.
+#
+# A bare key claims universality, so it must prove it: ubuntu (glibc) + alpine
+# (musl) + fedora (a different glibc vintage). The ALPINE LEG IS THE PROOF —
+# drop it and the universal claim is merely asserted.
+#
+# NO `containers[].setup` ANYWHERE, and that is a measured decision rather than
+# an omission. Zero DT_NEEDED means no shared library to provision, and the
+# smoke's chosen verbs (`version`, `generate-key-pair`, `public-key`) shell out
+# to nothing — unlike lefthook/prek, which hard-require `git`. Every assertion
+# was replayed inside stock `alpine:3.20` with `--network none` on all three
+# versions and passed, so the bare images are the honest claim: this artifact
+# needs NOTHING of the host.
+platforms:
+  linux/amd64:
+    runner: ubuntu-latest
+    containers: &linux_containers
+      - { image: "ubuntu:24.04", shell: bash }
+      - { image: "alpine:3.20", shell: sh }
+      - { image: "fedora:40", shell: bash }
+  linux/arm64:
+    # arm64 container legs run natively — no qemu — so the runner arch must
+    # match the platform or the renderer reds the leg up front. The container
+    # set is the same three images, aliased rather than copied so the two
+    # arches can never drift apart.
+    runner: ubuntu-24.04-arm
+    containers: *linux_containers
+  # No `containers:` on darwin or windows — those runners have no Linux
+  # container engine, and the key is rejected at spec load.
+  #
+  # ── Pass 2 (darwin) ────────────────────────────────────────────────────────
+  # Kept commented in lockstep with the matching `assets:` keys in
+  # cosign/mirror.yml. Staging `assets:` ALONE would not save runner minutes:
+  # a platform with no resolvable asset self-skips per VERSION but still boots a
+  # real macOS/Windows runner and reports SUCCESS having tested nothing. So the
+  # platform key and its asset regex are uncommented in the SAME pass.
+  # darwin/amd64:
+  #   # Intel slice tested on the arm64 macos-14 runner via Rosetta 2 —
+  #   # GitHub's native macos-13 Intel pool is exhausted and deadlocks push.
+  #   # The asset is a GOARCH=amd64 build, so `cosign version` still reports
+  #   # `Platform: darwin/amd64` under Rosetta and the smoke's platform-identity
+  #   # assertion holds.
+  #   runner: macos-14
+  #   prefix: ["arch", "-x86_64"]
+  # darwin/arm64:
+  #   runner: macos-14
+  #   shell: bash
+  #
+  # ── Pass 3 (windows) ───────────────────────────────────────────────────────
+  # windows/amd64 ONLY. Upstream ships no windows/arm64 asset — verified across
+  # all three in-range releases (83 assets each): the sole Windows artifact is
+  # `cosign-windows-amd64.exe`. Declaring windows/arm64 would boot a
+  # `windows-11-arm` runner that self-skips every version and greens having
+  # tested nothing.
+  # windows/amd64:
+  #   runner: windows-latest
+  #   shell: pwsh
+
+notify:
+  discord:
+    webhook_secret: OCX_MIRROR_DISCORD_HOOK
+    user_id: "227748867204972545"  # pinged in-message on failures

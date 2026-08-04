@@ -1,0 +1,213 @@
+# ⚠ `extends:` is a SHALLOW merge of TOP-LEVEL KEYS. Setting a key here
+# REPLACES the base's block outright — there is no per-key merge. `platforms:`
+# is deliberately NOT restated below: it carries the container legs that make
+# this spec's bare Linux keys honest, and restating it to tweak one runner
+# would drop them all without reddening anything. This repo is single-package,
+# so the measured matrix lives in the base and nothing here touches it.
+extends: ../mirror-base.yml
+
+name: cosign
+
+# Logical index package `sigstore/cosign` at the physical path
+# `ghcr.io/ocx-contrib/sigstore/cosign` — slash segments, never
+# hyphen-flattened. Two segments always. `sigstore` is the project's own brand
+# and it publishes SEVERAL tools (cosign, rekor, fulcio, gitsign,
+# policy-controller), so the org names the namespace under skill Phase 1 rule 1
+# — a repo that plausibly holds more than one package. The first segment must
+# be this repo's own GitHub owner: GITHUB_TOKEN only authorises packages owned
+# by the repo the workflow runs in.
+target:
+  registry: ghcr.io
+  repository: ocx-contrib/sigstore/cosign
+
+source:
+  type: github_release
+  owner: sigstore
+  repo: cosign
+
+  # ─── THE HEADLINE TRAP: TWO LIVE MAJOR TRAINS ────────────────────────────
+  #
+  # cosign maintains v3.x (current) and v2.x (LTS) SIMULTANEOUSLY, and the two
+  # release on overlapping dates — v3.1.2 and v2.6.4 are 95 minutes apart, and
+  # v3.0.6/v2.6.3 are 30 minutes apart. A naive "newest five by published_at"
+  # therefore yields the MIXED set `v3.1.2, v2.6.4, v3.1.1, v3.0.6, v2.6.3`.
+  # Anchoring major 3 into the pattern is what keeps the LTS line out; version
+  # ORDERING must likewise be by parsed semver and never by publish date.
+  #
+  #   $ gh api 'repos/sigstore/cosign/releases?per_page=30' \
+  #       --jq '.[] | "\(.tag_name)\t\(.published_at)"' | head -5
+  #   v3.1.2  2026-07-17T15:34:53Z
+  #   v2.6.4  2026-07-17T13:59:32Z      <- the interleaved LTS line
+  #   v3.1.1  2026-06-09T17:34:35Z
+  #   v3.0.6  2026-04-06T22:29:24Z
+  #   v2.6.3  2026-04-06T21:59:41Z      <- and again
+  #
+  # Tags carry a "v" prefix; the captured version does not. Uniform bare
+  # `vMAJOR.MINOR.PATCH` across the whole v3 line — no rc/beta suffix anywhere
+  # in the listing, and `skip_prereleases` in the base is belt-and-braces.
+  tag_pattern: "^v(?P<version>3\\.\\d+\\.\\d+)$"
+
+# ─── libc gate (Phase 3.5) — the evidence, not the conclusion ───────────────
+#
+# `os.features` states what an artifact REQUIRES OF THE HOST. cosign is Go, but
+# "Go is static" is an assumption and cgo variants exist, so all SIX declared
+# Linux artifacts were measured — both arches at both ends of the range AND in
+# the middle (3.0.6, 3.1.1, 3.1.2):
+#
+#   $ file cosign-linux-amd64
+#   ELF 64-bit LSB executable, x86-64, version 1 (SYSV), statically linked,
+#   with debug_info, not stripped
+#   $ file cosign-linux-arm64
+#   ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), statically
+#   linked, with debug_info, not stripped
+#   $ readelf -l v3.{0.6,1.1,1.2}/cosign-linux-{amd64,arm64} | grep -c INTERP → 0 (all six)
+#   $ readelf -d v3.{0.6,1.1,1.2}/cosign-linux-{amd64,arm64} | grep -c NEEDED → 0 (all six)
+#
+# UPX EXCLUDED, because a packer stub defeats every check above by leaving no
+# PT_INTERP and no section headers, making `file` call a glibc-dynamic binary
+# "statically linked". `strings -a | grep -c '^UPX'` returns 1 on two of the six
+# — but those hits are `UPXea` and `UPXy`, incidental substrings in a 130 MB
+# binary rather than the `UPX!` magic, and the structural checks settle it:
+#
+#   $ readelf -h … | grep 'Number of section headers'  → 24   (a stub has 0)
+#   $ readelf -h … | grep 'Start of section headers'   → 344  (a stub has 0)
+#   and `file` reads `with debug_info, not stripped` — unreadable through a stub.
+#
+# DECISIVE CROSS-CHECK, the one that does not depend on reading headers right:
+#
+#   $ docker run --rm -v …/cosign-linux-amd64:/c:ro alpine:3.20 /c version
+#   GitVersion:    v3.0.6            (and v3.1.2 likewise)   → exit 0
+#
+#   A glibc-dynamic binary exits 127 there. It ran.
+#
+#     ⇒ requires NOTHING of the host → BARE `linux/amd64` and `linux/arm64`.
+#       The alpine container leg in ../mirror-base.yml is what turns that
+#       universality claim into evidence rather than an assertion. Zero
+#       DT_NEEDED also means no shared library needs `containers[].setup`.
+#
+#   $ stat -c '%a' v3.*/cosign-*                 → 644 (all 15 assets)
+#       GitHub serves raw binaries WITHOUT the exec bit. `prepare` chmods 0755
+#       exactly the names metadata.json declares, which is why the hand-listed
+#       `binaries` claim there is load-bearing rather than documentation.
+#
+# ─── Asset format: RAW BINARY, and the prefix-collision trap ────────────────
+#
+# Every asset is a raw uncompressed binary — no archive layer, no extension on
+# unix, `.exe` on Windows. There is no `.gz`/`.tar` twin to mis-select here
+# (unlike lefthook), but there IS a prefix collision, and it is the reason every
+# pattern below is END-ANCHORED:
+#
+#   cosign-linux-amd64                      <- what this mirror ships
+#   cosign-linux-pivkey-pkcs11key-amd64     <- a DIFFERENT build
+#   cosign-linux-pivkey-pkcs11key-arm64
+#
+# The pivkey/pkcs11key variants add hardware PIV / PKCS#11 token support and
+# link `libpcsclite` at runtime, so they are neither interchangeable with the
+# base binary nor honestly declarable under a bare `os.features`. `^cosign-linux`
+# without a `$` would match them; `^cosign-linux-amd64$` cannot. Two matches is
+# a hard ambiguous error, but a wrong single match would ship silently.
+#
+# ─── Scope + resolution (verified on EVERY in-range release) ────────────────
+#
+# The mirrored range is exactly 3.0.6, 3.1.1 and 3.1.2 — three releases.
+# Upstream published no v3.0.0 and no v3.1.0 (both 404 on the releases API), so
+# the range spans two MINORS by necessity, not by preference. Each of the five
+# patterns below was matched against each release's FULL 83-asset list: EXACTLY
+# ONE match, every time, both ways, and no other asset matches any pattern. A
+# pattern matching zero is silently skipped rather than an error, which would
+# yield a green run with a missing platform.
+#
+# The asset names carry NO version string, so the usual "does the filename agree
+# with the tag" check is inexpressible here — it was replaced with the stronger
+# one, running each binary and reading what it says about itself:
+#
+#   $ v3.0.6/cosign-linux-amd64 version | grep GitVersion   → v3.0.6
+#   $ v3.1.1/cosign-linux-amd64 version | grep GitVersion   → v3.1.1
+#   $ v3.1.2/cosign-linux-amd64 version | grep GitVersion   → v3.1.2
+#
+#   No release ships a previous version's binaries under a new tag.
+#
+# Upstream also publishes, and this mirror deliberately does not carry:
+#   cosign-linux-pivkey-pkcs11key-{amd64,arm64} — different build, see above
+#   cosign-linux-arm                            — 32-bit; ocx has no such arch
+#   cosign-linux-{ppc64le,riscv64,s390x}        — ocx's Architecture enum is
+#                                                 amd64 and arm64 ONLY
+#   cosign-*.{rpm,deb,apk}                      — distro sidecars (~60 files)
+#   *.sigstore.json / *.sbom.json               — per-binary signing + SBOM
+#                                                 sidecars, two per artifact
+#   release-cosign.pub, cosign_checksums.txt    — bare key file and checksums
+# 83 assets per release, of which exactly 5 are mirrored. The anchored ^…$
+# regexes are what keep the other 78 out.
+assets:
+  linux/amd64:
+    - "^cosign-linux-amd64$"
+  linux/arm64:
+    - "^cosign-linux-arm64$"
+  # ── Pass 2 (darwin) ────────────────────────────────────────────────────────
+  # Uncommented together with the matching `platforms:` keys in
+  # ../mirror-base.yml, never on their own.
+  # darwin/amd64:
+  #   - "^cosign-darwin-amd64$"
+  # darwin/arm64:
+  #   - "^cosign-darwin-arm64$"
+  #
+  # ── Pass 3 (windows) ───────────────────────────────────────────────────────
+  # amd64 only — there is no `cosign-windows-arm64.exe` on any in-range release.
+  # windows/amd64:
+  #   - "^cosign-windows-amd64\\.exe$"
+
+asset_type:
+  # Raw binary on every platform — there is no archive to strip, so the file
+  # lands directly at the content root and PATH is a bare ${installPath}. That
+  # is the one layout where a bare ${installPath} is correct, and it is why
+  # `bin_scan` must stay `off` with `binaries` hand-listed (../mirror-base.yml).
+  #
+  # `name: cosign` renames each platform's asset (`cosign-linux-amd64`, …) to
+  # the bare tool name. The upstream Windows asset is ALREADY
+  # `cosign-windows-amd64.exe`, so the `.exe` suffix is preserved into the
+  # bundle and no per-platform `name: cosign.exe` override is needed — unlike
+  # mirror-direnv, whose Windows assets dropped the suffix and had to name it
+  # back on, since `asset_type: binary` preserves a suffix but never
+  # SYNTHESISES one. Verified rather than assumed: `pipeline prepare` against a
+  # windows/amd64-only temp spec, then `tar tvf` on the bundle showed
+  # `-rwxr-xr-x … cosign.exe`.
+  type: binary
+  name: cosign
+
+metadata:
+  default: metadata.json
+
+catalog:
+  logo: logo.svg
+
+versions:
+  # 3.0.6 is the floor, and it is a CATALOG-SCOPE choice rather than a forced
+  # one: asset naming is uniform far below it. It takes the current v3 line —
+  # three releases — instead of backfilling the v2 LTS train, which is a
+  # separate package decision and not this mirror's. Every release from the
+  # floor up is complete: no in-range release is missing a declared platform's
+  # asset, and an asset-less release inside the range would be dropped SILENTLY
+  # by the pipeline rather than reported.
+  min: "3.0.6"
+  new_per_run: 5
+  poll_interval: "52 */6 * * *"
+
+tests:
+  # `script:` resolves from the REPOSITORY ROOT — unlike `metadata.default` and
+  # `catalog.logo` above, which resolve against this spec's own directory.
+  - name: smoke
+    script: cosign/tests/smoke.star
+
+annotations:
+  # From the Phase 1.5 license gate:
+  #   $ gh api repos/sigstore/cosign/license --jq '{spdx:.license.spdx_id,path:.path}'
+  #   {"path":"LICENSE","spdx":"Apache-2.0"}
+  # Re-read from the raw LICENSE blob as well: the stock 201-line Apache-2.0
+  # text, unmodified, no added clauses.
+  org.opencontainers.image.licenses: "Apache-2.0"
+
+announce:
+  # Spelled out, not derived from target.repository — the logical name and the
+  # physical path are related by convention only.
+  package: sigstore/cosign
+  fork: ocx-contrib/index
